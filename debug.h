@@ -7,6 +7,13 @@
 
 #define MSG_LEVEL 0
 
-#define log(l, ...) if(l >= MSG_LEVEL) printf(__VA_ARGS__)
+#define log(l, ...) \
+	do\
+	{\
+		if(l >= MSG_LEVEL) {\
+			printf(__VA_ARGS__);\
+			printf("\n");\
+		}\
+	}while(0);
 
 #endif

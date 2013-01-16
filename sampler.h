@@ -1,12 +1,21 @@
 #ifndef _SAMPLER_H_
 #define _SAMPLER_H_
 
+#define GPIO_KEY	0
+#define GPIO_LED_1	1
+#define GPIO_LED_2	2
+#define GPIO_LED_3	3
+#define GPIO_RX		4
+#define GPIO_TX		5
+
+#define DATA_SAMPLE_RATE 20
+
 #ifdef __cplusplus
 extern "C" 
 {
 #endif
 
-#pagma pack(1)
+#pragma pack(1)
 typedef struct
 {
 	unsigned char raw;
@@ -15,14 +24,12 @@ typedef struct
 	unsigned char asp_rate;
 	unsigned char hea_rate;
 }current_values_t;
-#pagma pack()
+#pragma pack()
 
 typedef struct
 {
 	int start_time;
 	int interval;
-	int count; //count must less than 24
-	int value[24];
 }sleep_depth_t;
 
 typedef struct
@@ -46,6 +53,8 @@ extern int get_statistics_by_date(int timestamp, statistics_t* out);
 extern int get_sleep_points_by_month(int timestamp, sleep_points_by_month* out);
 extern int write_gpio(int gpio, int value);
 extern int read_gpio(int gpio, int* value);
+extern int start_sampler();
+extern void stop_sampler();
 #ifdef __cplusplus
 }
 #endif

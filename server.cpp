@@ -30,13 +30,16 @@ enum
 	DS_REQUEST_SET_SETTINGS = 0x95270002,
 	DS_REQUEST_GET_STATISTICS = 0x95270003,
 	DS_REQUEST_GET_SLEEP_POINTS_BY_MONTH = 0x95270004,
+	DS_REQUEST_SET_USER_NAME = 0x95270005,
+	DS_REQUEST_GET_HISTORY = 0x95270006,
+	DS_REQUEST_GET_RUNNING_STATUS = 0x95270007,
 };
 
 
 
 #define DATA_SERVER_SOCKET_NAME	"socket-data-server"
 
-#define MAX_DATA_SIZE 4096
+#define MAX_DATA_SIZE (86400 * DATA_SAMPLE_RATE * 4)
 
 static int send_nonblock(int s, void* buf, int len)
 {
@@ -203,29 +206,65 @@ static int request_get_statistics(int s, Parcel* in)
 	if (status != NO_ERROR)
 		return STATUS_FAILED;
 	
-	statistics_t statistics;
-	get_statistics_by_date(timestamp, &statistics);
-	
-	int i;
-	p.writeInt32(DS_REQUEST_GET_STATISTICS);
-	p.writeInt32(statistics.sleep_points);
-	for (i = 0; i < 4; i++) {
-		p.writeFloat(statistics.sleep_depth_dis[i]);	
+	int length = -1;
+	if (query_one_day_statistics(timestamp, &length) != STATUS_OK) {
+		response_status(s, DS_REQUEST_GET_STATISTICS, DS_REQUEST_FAILED);
+		return STATUS_FAILED;
+	} else {
+		void* result = malloc(length);
+		if (!result) {
+			log(ERROR, "Out of memory");
+			response_status(s, DS_REQUEST_GET_STATISTICS, DS_REQUEST_FAILED);
+			return STATUS_FAILED;				
+		}
+		if (get_one_day_statistics(timestamp, result, length) != STATUS_OK) {
+			response_status(s, DS_REQUEST_GET_STATISTICS, DS_REQUEST_FAILED);
+			free(result);
+			return STATUS_FAILED;				
+		} else {
+			p.write(result, length);
+		}
+		free(result);
 	}
-	p.writeInt32(statistics.sleep_start);
-	p.writeInt32(statistics.sleep_end);
 	
-	p.writeInt32(statistics.sleep_depth.start_time);
-	p.writeInt32(statistics.sleep_depth.interval);
-	p.writeInt32(statistics.sleep_depth.count);
-	for (i = 0; i < statistics.sleep_depth.count; i++) {
-		p.writeInt32(statistics.sleep_depth.value[i]);
-	}
 	return send_parcel(s, &p);
+}
+
+static int request_get_history(int s, Parcel* in)
+{
+	Parcel p;
+	int timestamp;
+	int status = in->readInt32(&timestamp);
+	if (status != NO_ERROR)
+		return STATUS_FAILED;
+	
+	int length = -1;
+	if (query_one_day_history(timestamp, &length) != STATUS_OK) {
+		response_status(s, DS_REQUEST_GET_HISTORY, DS_REQUEST_FAILED);
+		return STATUS_FAILED;
+	} else {
+		void* result = malloc(length);
+		if (!result) {
+			log(ERROR, "Out of memory");
+			response_status(s, DS_REQUEST_GET_HISTORY, DS_REQUEST_FAILED);
+			return STATUS_FAILED;				
+		}
+		if (get_one_day_history(timestamp, result, length) != STATUS_OK) {
+			response_status(s, DS_REQUEST_GET_HISTORY, DS_REQUEST_FAILED);
+			free(result);
+			return STATUS_FAILED;	
+		} else {
+			p.write(result, length);
+		}
+		free(result);
+	}
+	
+	return send_parcel(s, &p);		
 }
 
 static int request_get_sleep_point_by_month(int s, Parcel* in)
 {
+#if 0
 	sleep_points_by_month sleep_points;
 	int timestamp;
 	int status = in->readInt32(&timestamp);
@@ -238,10 +277,12 @@ static int request_get_sleep_point_by_month(int s, Parcel* in)
 	p.writeInt32(DS_REQUEST_GET_SLEEP_POINTS_BY_MONTH);
 	p.writeInt32(sleep_points.count);
 	for (i = 0; i < sleep_points.count; i++) {
-		p.writeInt32(sleep_points.value[i]);	
+		p.writeInt32(sleep_points.value[i]);
 	}
 	
 	return send_parcel(s, &p);
+#endif
+	return STATUS_OK;
 }
 
 

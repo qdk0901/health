@@ -17,12 +17,22 @@ typedef struct
 	int hea_stop_warning;
 }system_settings_t;
 
+typedef struct
+{
+	char user_name[USER_NAME_LENGTH];
+	int data_group;
+}data_settings_t;
+
+
 #ifdef __cplusplus
 extern "C" 
 {
 #endif
 
 extern system_settings_t g_default_settings;
+extern data_settings_t g_default_data_settings;
+extern int load_settings();
+extern int store_settings();
 
 #ifdef __cplusplus
 }

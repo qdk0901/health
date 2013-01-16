@@ -1,5 +1,6 @@
  #ifndef _TEST_DATA_H_
  #define _TEST_DATA_H_
+ #define CALCULATE_SIZE 512
  static float test_data[CALCULATE_SIZE] = {
         2.08,
         2.24,

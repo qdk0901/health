@@ -7,7 +7,8 @@ LOCAL_SRC_FILES:=\
 		workers.c \
 		sampler.c \
 		settings.c \
-		emd.c
+		storage.c \
+		key.c 
 
 LOCAL_SHARED_LIBRARIES := libcutils libc libutils \
     libbinder \

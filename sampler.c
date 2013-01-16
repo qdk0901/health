@@ -4,21 +4,13 @@
 #include <pthread.h>
 
 #include "common.h"
-#include "emd.h"
 #include "test_data.h"
 
 #define I2C_SLAVE 0x703
 #define I2C_SLAVE_FORCE 0x706
 #define I2C_GET_GPIO 0x707
 #define I2C_SET_GPIO 0x708
-
-#define GPIO_KEY	0
-#define GPIO_LED_1	1
-#define GPIO_LED_2	2
-#define GPIO_LED_3	3
-#define GPIO_RX		4
-#define GPIO_TX		5
-
+#define	DS_SIG_TIMER 0x31415926
 
 #define WORKING_VOLTAGE 3333
 
@@ -115,16 +107,21 @@ typedef struct
 	u32 value;
 }gpio_setting_t;
 
+static int g_fd = -1;
+static u16 g_config = 0;
+static int g_sampler_running = 0;
+static int g_signal_fd = -1;
+
 static int read_register(int fd, u8 reg, u16* out)
 {
 	u16 data;
 	if (write(fd, &reg, 1) != 1) {
-		log(ERROR, "set register address failed\n");
+		log(ERROR, "set register address failed");
 		return STATUS_FAILED;
 	}
 	
 	if (read(fd, &data, 2) != 2) {
-		log(ERROR, "read register failed\n");
+		log(ERROR, "read register failed");
 		return STATUS_FAILED;	
 	}
 	
@@ -143,7 +140,7 @@ static int write_register(int fd, u8 reg, u16 value)
 
 	int ret = write(fd, data, 3);
 	if (ret != 3) {
-		log(ERROR, "write register failed\n");
+		log(ERROR, "write register failed");
 		return STATUS_FAILED;	
 	}
 	return STATUS_OK;
@@ -223,7 +220,7 @@ static int adc_calibration(int fd)
 	}while((conv <= ADC_MIN || conv >= ADC_MAX) && fs >= 0);
 
 	if (fs < 0) {
-		log(ERROR, "adc calibration failed\n");
+		log(ERROR, "adc calibration failed");
 		return STATUS_FAILED;
 	}
 	return STATUS_OK;
@@ -247,19 +244,14 @@ static int calc_voltage(int adc, int config, int ref)
 
 	//adc = FS(input) - FS(ref) = FS(input - ref) = (input - ref) / (fs * 2 / 65536)
 	//input = adc * fs * 2 / 65536 + ref ;
-	//printf("raw %d, fs %d\n", adc, fs);
-	
-	//printf("%d\n", adc * fs * 2 / 65536);
+
 	return ref + adc * fs * 2 / 65536;
 }
 
-static int g_fd = -1;
-static u16 g_config = 0;
-
-static int adc_sanity_check()
+static int adc_sanity_check(int fd)
 {
 	u16 test;
-	return read_register(g_fd, REG_CONV, &test);
+	return read_register(fd, REG_CONV, &test);
 }
 
 int write_gpio(int gpio, int value)
@@ -280,25 +272,42 @@ int read_gpio(int gpio, int* value)
 	return ret;
 }
 
+int start_sampler()
+{
+	if (adc_calibration(g_fd) != STATUS_OK)
+		return STATUS_FAILED;
+	if (read_register(g_fd, REG_CONF, &g_config) != STATUS_OK)
+		return STATUS_FAILED;
+	
+	g_sampler_running = 1;
+	
+	log(INFO, "Data sampler started");
+	return STATUS_OK;
+}
+
+void stop_sampler()
+{
+	g_sampler_running = 0;
+	log(INFO, "Data sampler stopped");
+}
+
 static int init_adc()
 {
 	int fd = open("/dev/io_emul_i2c",O_RDWR);
 
 	if ( fd < 0 ) {
-		log(ERROR, "cannot open device /dev/i2c-3\n");
+		log(ERROR, "cannot open device /dev/i2c-3");
 		return STATUS_FAILED;	
 	}
 
 	int ret = ioctl(fd,I2C_SLAVE_FORCE, 0x48);
 	if (ret != STATUS_OK) {
-		log(ERROR, "ioctl error: %s\n", strerror(errno));
+		log(ERROR, "ioctl error: %s", strerror(errno));
 		return STATUS_FAILED;
-	} 
-	g_fd = fd;
+	}
 
-
-	if (adc_sanity_check() != STATUS_OK) {
-		log(ERROR, "adc does not work well!!\n");
+	if (adc_sanity_check(fd) != STATUS_OK) {
+		log(ERROR, "adc does not work well!!");
 		return STATUS_FAILED;
 	}
 
@@ -307,10 +316,7 @@ static int init_adc()
 	set_data_rate(fd, ADC_DR_250SPS);
 	set_device_mode(fd, ADC_DM_CONTINUOUS);
 
-	adc_calibration(fd);
-	
-	read_register(fd, REG_CONF, &g_config);
-	
+	g_fd = fd;
 	return STATUS_OK;
 }
 
@@ -319,21 +325,6 @@ static void push_raw_data(float vol)
 	// do the calculation here
 }
 
-int get_current(current_values_t* out)
-{
-	out->raw = 0;
-	out->asp = 0;
-	out->hea = 0;
-	out->asp_rate = 0;
-	out->hea_rate = 0;
-	return STATUS_OK;
-}
-
-
-#define	DS_SIG_TIMER 0x31415926
-
-static int g_signal_fd = -1;
-
 static void signal_handler(int s)
 {
 	int i;
@@ -341,22 +332,22 @@ static void signal_handler(int s)
 	if (s == SIGALRM) {
 		sig = DS_SIG_TIMER;
 	}
-
-	write(g_signal_fd, &sig, 4);
+	
+	if (g_sampler_running) {
+		write(g_signal_fd, &sig, 4);
+	}
 }
 
 
 static int start_timer()
 {
 	struct itimerval itv, oitv;
-
-	//start timer immediately
+	
 	itv.it_value.tv_sec = 1;
 	itv.it_value.tv_usec = 0;
 
-	//25Hz
 	itv.it_interval.tv_sec = 0;
-	itv.it_interval.tv_usec = 40000;
+	itv.it_interval.tv_usec = 1000000 / DATA_SAMPLE_RATE;
 
 
 	setitimer(ITIMER_REAL, &itv, &oitv);
@@ -372,10 +363,7 @@ static int timer_event_handler(void* param)
 	read(evi->fd, &sig, 4);
 	if (sig == DS_SIG_TIMER) {
 #if TESTING_MODE
-		push_raw_data(test_data[g_test_index]);
-		g_test_index++;
-		if (g_test_index == CALCULATE_SIZE)
-			g_test_index = 0;
+		//push_raw_data(test_data[g_test_index]);
 #else
 		short raw;
 		int ret = read_register(g_fd, REG_CONV, &raw);
@@ -389,7 +377,6 @@ static int timer_event_handler(void* param)
 	return STATUS_OK;
 }
 
-
 int init_sampler()
 {
 	int pfd[2];
@@ -399,10 +386,6 @@ int init_sampler()
 		return STATUS_FAILED;	
 	}
 #endif
-	
-	emd_init();
-	
-	g_data_index = 0;
 	
 	pipe(pfd);
 	if (pfd[0] < 0 || pfd[1] < 0) {
@@ -421,13 +404,13 @@ int init_sampler()
 	return STATUS_OK;
 }
 
-int get_statistics_by_date(int timestamp, statistics_t* out)
+int get_current(current_values_t* out)
 {
-	return STATUS_OK;
-}
-
-int get_sleep_points_by_month(int timestamp, sleep_points_by_month* out)
-{
+	out->raw = 0;
+	out->asp = 0;
+	out->hea = 0;
+	out->asp_rate = 0;
+	out->hea_rate = 0;
 	return STATUS_OK;
 }
 
